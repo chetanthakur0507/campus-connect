@@ -74,7 +74,7 @@ export default function CampusConnectApp() {
         {stage === "matching" && (
           <section className="glass-panel flex min-h-[480px] flex-col items-center justify-center gap-5 rounded-3xl border border-white/15 p-6 text-center">
             <div className="h-20 w-20 animate-pulse rounded-full bg-gradient-to-br from-cyan-400 to-orange-400" />
-            <h2 className="text-2xl font-semibold text-white">M.</h2>
+            <h2 className="text-2xl font-semibold text-white">Matching in progress...</h2>
             <p className="max-w-lg text-sm text-slate-300">
               {selectedGender === "male" && "Boy preference selected. Suitable partner dhundh rahe hain."}
               {selectedGender === "female" && "Girl preference selected. Suitable partner dhundh rahe hain."}
