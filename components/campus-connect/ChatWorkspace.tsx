@@ -1,19 +1,26 @@
+'use client';
+
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
-import { ActivePanel, ChatMessage } from "./types";
+import { ActivePanel, ChatMessage, UserProfile } from "./types";
 
 type ChatWorkspaceProps = {
-  partner: string;
+  partner: UserProfile;
   onExit: () => void;
+  userSessionId: string;
 };
 
 type CallState = "idle" | "ringing" | "connected";
 
-const sampleReplies = [
-  "Haan, campus life kaisi chal rahi?",
-  "Yahan anonymous hone se kaafi safe feel hota hai.",
-  "Agar chaho voice par switch kar lete hain.",
-  "VC bhi smooth chal rahi hai demo me.",
-];
+type DBMessage = {
+  _id: string;
+  senderSessionId: string;
+  receiverSessionId: string;
+  senderName: string;
+  senderAvatar: string;
+  text: string;
+  timestamp: string;
+  status: 'sent' | 'read';
+};
 
 const formatClock = (date: Date) =>
   `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
@@ -36,15 +43,10 @@ const getStatusTick = (status: ChatMessage["status"]) => {
   if (status === "sending") {
     return "✓";
   }
-
-  if (status === "sent") {
-    return "✓✓";
-  }
-
   return "✓✓";
 };
 
-export default function ChatWorkspace({ partner, onExit }: ChatWorkspaceProps) {
+export default function ChatWorkspace({ partner, onExit, userSessionId }: ChatWorkspaceProps) {
   const [panel, setPanel] = useState<ActivePanel>("chat");
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
@@ -53,29 +55,115 @@ export default function ChatWorkspace({ partner, onExit }: ChatWorkspaceProps) {
   const [videoOn, setVideoOn] = useState(true);
   const [micOn, setMicOn] = useState(true);
   const [frontCamera, setFrontCamera] = useState(true);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "seed",
-      sender: "partner",
-      text: "Hi! Match connect ho gaya. Safe anonymous chat start karo.",
-      time: formatClock(new Date()),
-      status: "read",
-      dateKey: getDateKey(new Date()),
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [callSeconds, setCallSeconds] = useState(0);
   const [callState, setCallState] = useState<CallState>("idle");
   const [mediaError, setMediaError] = useState("");
+  const [loading, setLoading] = useState(true);
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastMessageTimeRef = useRef<string>("");
 
   const contactRail = [
-    { id: "active", name: partner, status: "Online now", active: true },
-    { id: "recent-1", name: "Recent Match", status: "Last seen 2m ago", active: false },
-    { id: "recent-2", name: "Anonymous User", status: "Last seen 11m ago", active: false },
+    { id: "active", name: partner.name, status: "Online now", active: true, avatar: partner.avatar },
+    { id: "recent-1", name: "Recent Match", status: "Last seen 2m ago", active: false, avatar: "👤" },
+    { id: "recent-2", name: "Anonymous User", status: "Last seen 11m ago", active: false, avatar: "👤" },
   ];
+
+  // Mark user as busy when chat starts
+  useEffect(() => {
+    const markBusy = async () => {
+      try {
+        await fetch("/api/users/chat-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: userSessionId,
+            busy: true,
+            currentChatWith: partner.sessionId,
+          }),
+        });
+      } catch (error) {
+        console.error("Error marking user as busy:", error);
+      }
+    };
+
+    markBusy();
+  }, [userSessionId, partner.sessionId]);
+
+  // Fetch initial messages
+  useEffect(() => {
+    const fetchMessages = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(
+          `/api/messages/between?userSessionId=${userSessionId}&otherSessionId=${partner.sessionId}`
+        );
+        const dbMessages = await response.json();
+
+        if (Array.isArray(dbMessages)) {
+          const converted: ChatMessage[] = dbMessages.map((msg: DBMessage) => ({
+            id: msg._id,
+            sender: msg.senderSessionId === userSessionId ? "you" : "partner",
+            text: msg.text,
+            time: formatClock(new Date(msg.timestamp)),
+            status: msg.status === 'sent' ? "sent" : "read",
+            dateKey: getDateKey(new Date(msg.timestamp)),
+          }));
+          setMessages(converted);
+          if (converted.length > 0) {
+            lastMessageTimeRef.current = dbMessages[dbMessages.length - 1].timestamp;
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching messages:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMessages();
+  }, [userSessionId, partner.sessionId]);
+
+  // Poll for new messages
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const response = await fetch(
+          `/api/messages/between?userSessionId=${userSessionId}&otherSessionId=${partner.sessionId}`
+        );
+        const dbMessages = await response.json();
+
+        if (Array.isArray(dbMessages) && dbMessages.length > 0) {
+          const lastMsg = dbMessages[dbMessages.length - 1];
+          
+          if (lastMsg.timestamp !== lastMessageTimeRef.current) {
+            lastMessageTimeRef.current = lastMsg.timestamp;
+
+            const converted: ChatMessage[] = dbMessages.map((msg: DBMessage) => ({
+              id: msg._id,
+              sender: msg.senderSessionId === userSessionId ? "you" : "partner",
+              text: msg.text,
+              time: formatClock(new Date(msg.timestamp)),
+              status: msg.status === 'sent' ? "sent" : "read",
+              dateKey: getDateKey(new Date(msg.timestamp)),
+            }));
+            setMessages(converted);
+          }
+        }
+      } catch (error) {
+        console.error("Error polling messages:", error);
+      }
+    };
+
+    pollIntervalRef.current = setInterval(poll, 1500);
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    };
+  }, [userSessionId, partner.sessionId]);
 
   useEffect(() => {
     return () => {
@@ -160,7 +248,7 @@ export default function ChatWorkspace({ partner, onExit }: ChatWorkspaceProps) {
     }
   }, [micOn, isMuted, videoOn]);
 
-  const sendMessage = (event: FormEvent) => {
+  const sendMessage = async (event: FormEvent) => {
     event.preventDefault();
 
     const trimmed = input.trim();
@@ -169,9 +257,11 @@ export default function ChatWorkspace({ partner, onExit }: ChatWorkspaceProps) {
     }
 
     const now = new Date();
-    const id = `${Date.now()}-${Math.random()}`;
+    const tempId = `temp-${Date.now()}`;
+
+    // Optimistic update
     const outgoing: ChatMessage = {
-      id,
+      id: tempId,
       sender: "you",
       text: trimmed,
       time: formatClock(now),
@@ -182,29 +272,36 @@ export default function ChatWorkspace({ partner, onExit }: ChatWorkspaceProps) {
     setMessages((prev) => [...prev, outgoing]);
     setInput("");
 
-    window.setTimeout(() => {
-      setMessages((prev) =>
-        prev.map((message) => (message.id === id ? { ...message, status: "sent" } : message)),
-      );
-    }, 380);
+    try {
+      const response = await fetch("/api/messages/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          senderSessionId: userSessionId,
+          receiverSessionId: partner.sessionId,
+          text: trimmed,
+        }),
+      });
 
-    setTyping(true);
-
-    window.setTimeout(() => {
-      const replyNow = new Date();
-      setMessages((prev) => [
-        ...prev.map((message) => (message.id === id ? { ...message, status: "read" } : message)),
-        {
-          id: `${Date.now()}-reply`,
-          sender: "partner",
-          text: sampleReplies[Math.floor(Math.random() * sampleReplies.length)],
-          time: formatClock(replyNow),
-          status: "read",
-          dateKey: getDateKey(replyNow),
-        },
-      ]);
-      setTyping(false);
-    }, 1200);
+      if (response.ok) {
+        const savedMsg = await response.json();
+        
+        // Replace temp message with actual saved message
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === tempId
+              ? {
+                  ...msg,
+                  id: savedMsg._id,
+                  status: "sent" as const,
+                }
+              : msg
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Error sending message:", error);
+    }
   };
 
   const sendFileMessage = (file: File) => {
@@ -234,6 +331,25 @@ export default function ChatWorkspace({ partner, onExit }: ChatWorkspaceProps) {
 
     sendFileMessage(selected);
     event.target.value = "";
+  };
+
+  const handleExit = async () => {
+    // Mark user as not busy
+    try {
+      await fetch("/api/users/chat-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: userSessionId,
+          busy: false,
+          currentChatWith: null,
+        }),
+      });
+    } catch (error) {
+      console.error("Error marking user as not busy:", error);
+    }
+
+    onExit();
   };
 
   const callStatusText =
@@ -279,10 +395,16 @@ export default function ChatWorkspace({ partner, onExit }: ChatWorkspaceProps) {
 
         <div className="flex flex-col">
           <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-900/95 px-4 py-3 backdrop-blur">
-            <div>
-              <p className="text-xs text-cyan-200/80">Connected and Anonymous</p>
-              <p className="text-base font-semibold text-white">{partner}</p>
-              <p className={`text-xs ${statusColor}`}>{callStatusText}</p>
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-full bg-gradient-to-br from-cyan-400 to-orange-400 flex items-center justify-center text-xl font-bold">
+                {partner.avatar}
+              </div>
+              <div>
+                <p className="text-xs text-cyan-200/80">Connected and Anonymous</p>
+                <p className="text-base font-semibold text-white">{partner.name}</p>
+                <p className="text-xs text-slate-300">{partner.year} Year • {partner.college}</p>
+                <p className={`text-xs ${statusColor}`}>{callStatusText}</p>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -308,7 +430,7 @@ export default function ChatWorkspace({ partner, onExit }: ChatWorkspaceProps) {
                 );
               })}
               <button
-                onClick={onExit}
+                onClick={handleExit}
                 className="rounded-xl border border-rose-300/40 bg-rose-500/15 px-3 py-2 text-xs font-semibold text-rose-100"
               >
                 Instant Exit
@@ -319,77 +441,80 @@ export default function ChatWorkspace({ partner, onExit }: ChatWorkspaceProps) {
           {panel === "chat" && (
             <div className="flex min-h-[500px] flex-col bg-slate-950/45">
               <div className="custom-scroll flex-1 space-y-3 overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.15),transparent_35%),radial-gradient(circle_at_80%_75%,rgba(45,212,191,0.14),transparent_38%),#020617] p-4">
-                {messages.map((message, index) => {
-                  const previous = messages[index - 1];
-                  const showDateSeparator = !previous || previous.dateKey !== message.dateKey;
-                  const isYou = message.sender === "you";
-                  const tickColor = message.status === "read" ? "text-sky-500" : "text-slate-400";
+                {loading ? (
+                  <div className="flex items-center justify-center h-full">
+                    <p className="text-slate-400">Loading messages...</p>
+                  </div>
+                ) : messages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <p className="text-slate-400">No messages yet. Start the conversation!</p>
+                  </div>
+                ) : (
+                  messages.map((message, index) => {
+                    const previous = messages[index - 1];
+                    const showDateSeparator = !previous || previous.dateKey !== message.dateKey;
+                    const isYou = message.sender === "you";
+                    const tickColor = message.status === "read" ? "text-sky-500" : "text-slate-400";
 
-                  return (
-                    <div key={message.id}>
-                      {showDateSeparator && (
-                        <div className="my-3 flex justify-center">
-                          <span className="rounded-full border border-white/15 bg-slate-800/75 px-3 py-1 text-[11px] text-slate-200">
-                            {getDateLabel(message.dateKey)}
-                          </span>
-                        </div>
-                      )}
-
-                      <div
-                        className={`max-w-[86%] rounded-2xl px-3 py-2 text-sm shadow-sm md:max-w-[74%] ${
-                          isYou
-                            ? "ml-auto rounded-tr-md bg-[#d9fdd3] text-slate-900"
-                            : "rounded-tl-md bg-white text-slate-900"
-                        }`}
-                      >
-                        {message.attachment && (
-                          <div className="mb-2 rounded-xl border border-slate-300/70 bg-white/80 px-3 py-2">
-                            <p className="text-xs font-semibold">{message.attachment.name}</p>
-                            <p className="text-[11px] text-slate-500">{message.attachment.sizeLabel}</p>
+                    return (
+                      <div key={message.id}>
+                        {showDateSeparator && (
+                          <div className="my-3 flex justify-center">
+                            <span className="rounded-full border border-white/15 bg-slate-800/75 px-3 py-1 text-[11px] text-slate-200">
+                              {getDateLabel(message.dateKey)}
+                            </span>
                           </div>
                         )}
 
-                        <p>{message.text}</p>
-                        <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-500">
-                          <span>{message.time}</span>
-                          {isYou && (
-                            <span className={tickColor}>{getStatusTick(message.status)}</span>
+                        <div
+                          className={`max-w-[86%] rounded-2xl px-3 py-2 text-sm shadow-sm md:max-w-[74%] ${
+                            isYou
+                              ? "ml-auto rounded-tr-md bg-[#d9fdd3] text-slate-900"
+                              : "rounded-tl-md bg-white text-slate-900"
+                          }`}
+                        >
+                          {message.attachment ? (
+                            <div className="flex items-center gap-2">
+                              <span>📎</span>
+                              <a href="#" className="underline">
+                                {message.attachment.name}
+                              </a>
+                              <span className="text-xs text-slate-600">({message.attachment.sizeLabel})</span>
+                            </div>
+                          ) : (
+                            message.text
                           )}
+                          <div className="mt-1 flex items-center justify-between gap-1">
+                            <p className="text-xs text-slate-600">{message.time}</p>
+                            {isYou && <span className={`text-xs ${tickColor}`}>{getStatusTick(message.status)}</span>}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-                {typing && <p className="text-xs text-slate-300">{partner} is typing...</p>}
+                    );
+                  })
+                )}
               </div>
 
-              <form onSubmit={sendMessage} className="border-t border-white/10 bg-slate-900/70 p-3">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  onChange={onSelectFile}
-                  accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.txt"
-                />
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="rounded-full border border-white/20 bg-white/5 px-3 py-2 text-xs text-slate-200"
-                  >
-                    Emoji
-                  </button>
+              <form onSubmit={sendMessage} className="border-t border-white/10 bg-slate-900 p-3">
+                <div className="flex items-end gap-3">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={onSelectFile}
+                    className="hidden"
+                  />
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="rounded-full border border-white/20 bg-white/5 px-3 py-2 text-xs text-slate-200"
+                    className="rounded-full bg-white/10 px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-white/20"
                   >
-                    Upload File
+                    📎 Attach
                   </button>
                   <input
                     value={input}
-                    onChange={(event) => setInput(event.target.value)}
-                    placeholder="Type a message"
-                    className="w-full rounded-full border border-white/15 bg-slate-800/85 px-4 py-3 text-sm text-white outline-none focus:border-cyan-300"
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Type a message..."
+                    className="flex-1 rounded-full bg-slate-800 px-4 py-3 text-sm text-white placeholder-slate-400 outline-none"
                   />
                   <button
                     type="submit"
@@ -428,7 +553,7 @@ export default function ChatWorkspace({ partner, onExit }: ChatWorkspaceProps) {
                   {speakerOn ? "Speaker On" : "Speaker Off"}
                 </button>
                 <button
-                  onClick={onExit}
+                  onClick={handleExit}
                   className="rounded-full bg-rose-500 px-4 py-2 text-sm font-semibold text-white"
                 >
                   End Call
@@ -480,7 +605,7 @@ export default function ChatWorkspace({ partner, onExit }: ChatWorkspaceProps) {
                   Flip Camera
                 </button>
                 <button
-                  onClick={onExit}
+                  onClick={handleExit}
                   className="rounded-full bg-rose-500 px-4 py-2 text-sm font-semibold text-white"
                 >
                   End VC
