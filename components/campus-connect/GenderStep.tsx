@@ -16,8 +16,8 @@ const options: Array<{ value: MatchPreference; label: string; hint: string }> = 
 export default function GenderStep({ selected, onSelect, onContinue, onBack }: GenderStepProps) {
   return (
     <section className="glass-panel rounded-3xl border border-white/15 p-6 md:p-8">
-      <h2 className="text-2xl font-semibold text-white">Kisse baat karni hai?</h2>
-      <p className="mt-2 text-sm text-slate-300">Gender choose karo, fir.</p>
+      <h2 className="text-2xl font-semibold text-white">K</h2>
+      <p className="mt-2 text-sm text-slate-300">Gender choose karo, fir matching start hogi.</p>
 
       <div className="mt-6 space-y-3">
         {options.map((option) => {
