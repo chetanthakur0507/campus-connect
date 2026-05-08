@@ -60,12 +60,15 @@ export default function ChatWorkspace({ partner, onExit, userSessionId }: ChatWo
   const [callState, setCallState] = useState<CallState>("idle");
   const [mediaError, setMediaError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [newMessageIds, setNewMessageIds] = useState<Set<string>>(new Set());
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastMessageTimeRef = useRef<string>("");
+  const previousLengthRef = useRef<number>(0);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
   const contactRail = [
     { id: "active", name: partner.name, status: "Online now", active: true, avatar: partner.avatar },
@@ -127,6 +130,41 @@ export default function ChatWorkspace({ partner, onExit, userSessionId }: ChatWo
 
     fetchMessages();
   }, [userSessionId, partner.sessionId]);
+
+  // Track newly added messages for animation
+  useEffect(() => {
+    if (messages.length > previousLengthRef.current) {
+      const newIds = new Set<string>();
+      const startIndex = previousLengthRef.current;
+      
+      for (let i = startIndex; i < messages.length; i++) {
+        newIds.add(messages[i].id);
+      }
+      
+      setNewMessageIds(newIds);
+      
+      // Remove animation class after animation completes (400ms)
+      const timer = setTimeout(() => {
+        setNewMessageIds(new Set());
+      }, 400);
+      
+      return () => clearTimeout(timer);
+    }
+    
+    previousLengthRef.current = messages.length;
+  }, [messages]);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (messagesContainerRef.current) {
+      setTimeout(() => {
+        messagesContainerRef.current?.scrollTo({
+          top: messagesContainerRef.current.scrollHeight,
+          behavior: "smooth",
+        });
+      }, 0);
+    }
+  }, [messages]);
 
   // Poll for new messages
   useEffect(() => {
@@ -440,7 +478,7 @@ export default function ChatWorkspace({ partner, onExit, userSessionId }: ChatWo
 
           {panel === "chat" && (
             <div className="flex min-h-[500px] flex-col bg-slate-950/45">
-              <div className="custom-scroll flex-1 space-y-3 overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.15),transparent_35%),radial-gradient(circle_at_80%_75%,rgba(45,212,191,0.14),transparent_38%),#020617] p-4">
+              <div ref={messagesContainerRef} className="custom-scroll flex-1 space-y-3 overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.15),transparent_35%),radial-gradient(circle_at_80%_75%,rgba(45,212,191,0.14),transparent_38%),#020617] p-4">
                 {loading ? (
                   <div className="flex items-center justify-center h-full">
                     <p className="text-slate-400">Loading messages...</p>
@@ -471,7 +509,7 @@ export default function ChatWorkspace({ partner, onExit, userSessionId }: ChatWo
                             isYou
                               ? "ml-auto rounded-tr-md bg-[#d9fdd3] text-slate-900"
                               : "rounded-tl-md bg-white text-slate-900"
-                          }`}
+                          } ${newMessageIds.has(message.id) ? "message-animate" : ""}`}
                         >
                           {message.attachment ? (
                             <div className="flex items-center gap-2">
