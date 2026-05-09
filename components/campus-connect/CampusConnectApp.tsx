@@ -7,6 +7,7 @@ import HowItWorksSheet from "./HowItWorksSheet";
 import LandingScreen from "./LandingScreen";
 import ActiveUsersPanel from "./ActiveUsersPanel";
 import ProfileCreation from "./ProfileCreation";
+import Navbar from "./Navbar";
 import { MatchPreference, UserProfile } from "./types";
 
 type Stage = "landing" | "gender" | "browse" | "matching" | "connected";
@@ -19,6 +20,7 @@ export default function CampusConnectApp() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [onlineUsers, setOnlineUsers] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Check if user already has a profile on mount
@@ -26,11 +28,29 @@ export default function CampusConnectApp() {
     const storedSessionId = localStorage.getItem("cc_sessionId");
     if (storedSessionId) {
       setSessionId(storedSessionId);
-      // Mark user as active
+      // Mark user as active and fetch profile
       updateUserStatus(storedSessionId, true);
+      fetchUserProfile(storedSessionId);
     }
     setLoading(false);
   }, []);
+
+  // Fetch current user profile
+  const fetchUserProfile = async (sid: string) => {
+    try {
+      const response = await fetch("/api/users/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: sid }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentUser(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch user profile:", err);
+    }
+  };
 
   // Update user status on the server
   const updateUserStatus = async (sid: string, active: boolean) => {
@@ -125,8 +145,25 @@ export default function CampusConnectApp() {
     }
   };
 
+  const handleLogout = async () => {
+    if (sessionId) {
+      // Mark user as offline
+      await updateUserStatus(sessionId, false);
+    }
+    // Clear session from localStorage
+    localStorage.removeItem("cc_sessionId");
+    // Reset all state
+    setSessionId(null);
+    setCurrentUser(null);
+    setStage("landing");
+    setSelectedGender(null);
+    setPartner(null);
+    setUsers([]);
+  };
+
   const handleProfileCreated = (newSessionId: string) => {
     setSessionId(newSessionId);
+    fetchUserProfile(newSessionId);
   };
 
   if (loading) {
@@ -145,6 +182,9 @@ export default function CampusConnectApp() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#041025] text-slate-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_15%,rgba(14,165,233,0.36),transparent_35%),radial-gradient(circle_at_82%_18%,rgba(251,146,60,0.27),transparent_38%),radial-gradient(circle_at_52%_84%,rgba(20,184,166,0.3),transparent_40%)]" />
+
+      {/* Navbar */}
+      <Navbar user={currentUser} onlineCount={onlineUsers} onLogout={handleLogout} />
 
       <main className="relative z-10 mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 md:px-8 md:py-8">
         {stage === "landing" && (
