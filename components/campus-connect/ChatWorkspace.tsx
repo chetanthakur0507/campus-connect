@@ -1,12 +1,13 @@
 'use client';
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
-import { ActivePanel, ChatMessage, UserProfile } from "./types";
+import { ActivePanel, ChatMessage, UserProfile, ReportReason } from "./types";
 
 type ChatWorkspaceProps = {
   partner: UserProfile;
   onExit: () => void;
   userSessionId: string;
+  onBlockUser: (userId: string, userName: string, reason?: ReportReason, details?: string) => void;
 };
 
 type CallState = "idle" | "ringing" | "connected";
@@ -46,7 +47,7 @@ const getStatusTick = (status: ChatMessage["status"]) => {
   return "✓✓";
 };
 
-export default function ChatWorkspace({ partner, onExit, userSessionId }: ChatWorkspaceProps) {
+export default function ChatWorkspace({ partner, onExit, userSessionId, onBlockUser }: ChatWorkspaceProps) {
   const [panel, setPanel] = useState<ActivePanel>("chat");
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
@@ -57,6 +58,9 @@ export default function ChatWorkspace({ partner, onExit, userSessionId }: ChatWo
   const [frontCamera, setFrontCamera] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [callSeconds, setCallSeconds] = useState(0);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [reportReason, setReportReason] = useState<ReportReason | "">("inappropriate");
+  const [reportDetails, setReportDetails] = useState("");
   const [callState, setCallState] = useState<CallState>("idle");
   const [mediaError, setMediaError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -473,6 +477,13 @@ export default function ChatWorkspace({ partner, onExit, userSessionId }: ChatWo
               >
                 Instant Exit
               </button>
+              <button
+                onClick={() => setReportModalOpen(true)}
+                className="rounded-xl border border-red-300/40 bg-red-500/15 px-3 py-2 text-xs font-semibold text-red-100"
+                title="Block/Report user"
+              >
+                🚫 Block
+              </button>
             </div>
           </header>
 
@@ -653,6 +664,69 @@ export default function ChatWorkspace({ partner, onExit, userSessionId }: ChatWo
           )}
         </div>
       </div>
+
+      {/* Report/Block Modal */}
+      {reportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-white/20 bg-slate-900 p-6 shadow-2xl">
+            <h2 className="mb-4 text-xl font-semibold text-white">Block & Report User</h2>
+            
+            <div className="mb-4">
+              <p className="mb-2 text-sm text-slate-300">Report Reason:</p>
+              <select
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value as ReportReason)}
+                className="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-white placeholder-slate-400"
+              >
+                <option value="inappropriate">Inappropriate Content</option>
+                <option value="harassment">Harassment</option>
+                <option value="spam">Spam</option>
+                <option value="fake">Fake Profile</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            <div className="mb-6">
+              <p className="mb-2 text-sm text-slate-300">Additional Details (Optional):</p>
+              <textarea
+                value={reportDetails}
+                onChange={(e) => setReportDetails(e.target.value)}
+                placeholder="Describe the issue..."
+                className="h-20 w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-white placeholder-slate-400 resize-none"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setReportModalOpen(false);
+                  setReportReason("inappropriate");
+                  setReportDetails("");
+                }}
+                className="flex-1 rounded-lg border border-white/20 bg-white/5 px-4 py-2 font-semibold text-white hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  onBlockUser(
+                    partner.sessionId || partner.id,
+                    partner.name,
+                    reportReason as ReportReason,
+                    reportDetails
+                  );
+                  setReportModalOpen(false);
+                  setReportReason("inappropriate");
+                  setReportDetails("");
+                }}
+                className="flex-1 rounded-lg bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700"
+              >
+                Block & Report
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

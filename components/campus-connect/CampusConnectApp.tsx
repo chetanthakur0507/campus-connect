@@ -8,7 +8,7 @@ import LandingScreen from "./LandingScreen";
 import ActiveUsersPanel from "./ActiveUsersPanel";
 import ProfileCreation from "./ProfileCreation";
 import Navbar from "./Navbar";
-import { MatchPreference, UserProfile } from "./types";
+import { MatchPreference, UserProfile, BlockedUser, ReportReason } from "./types";
 
 type Stage = "landing" | "gender" | "browse" | "matching" | "connected";
 
@@ -22,6 +22,7 @@ export default function CampusConnectApp() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
 
   // Check if user already has a profile on mount
   useEffect(() => {
@@ -32,6 +33,17 @@ export default function CampusConnectApp() {
       updateUserStatus(storedSessionId, true);
       fetchUserProfile(storedSessionId);
     }
+    
+    // Load blocked users from localStorage
+    const storedBlocked = localStorage.getItem("cc_blockedUsers");
+    if (storedBlocked) {
+      try {
+        setBlockedUsers(JSON.parse(storedBlocked));
+      } catch (err) {
+        console.error("Failed to load blocked users:", err);
+      }
+    }
+    
     setLoading(false);
   }, []);
 
@@ -120,6 +132,9 @@ export default function CampusConnectApp() {
       filtered = filtered.filter((u) => u.gender === "female");
     }
 
+    // Filter out blocked users
+    filtered = filtered.filter((u) => !blockedUsers.find((b) => b.userId === u.sessionId));
+
     if (filtered.length === 0) {
       alert(`Aapke preference ke andar koi active user nahi. Try 'any' preference!`);
       return;
@@ -143,6 +158,34 @@ export default function CampusConnectApp() {
     if (sessionId) {
       await updateUserStatus(sessionId, true);
     }
+  };
+
+  // Block a user
+  const blockUser = (userId: string, userName: string, reason?: ReportReason, details?: string) => {
+    const blockedUser: BlockedUser = {
+      userId,
+      name: userName,
+      blockedAt: new Date().toISOString(),
+      reason,
+      reportDetails: details,
+    };
+
+    const updated = [...blockedUsers, blockedUser];
+    setBlockedUsers(updated);
+    localStorage.setItem("cc_blockedUsers", JSON.stringify(updated));
+
+    // Exit the current chat
+    resetFlow();
+
+    // Show confirmation
+    alert(`${userName} ko block kar diya gaya! 🚫`);
+  };
+
+  // Unblock a user
+  const unblockUser = (userId: string) => {
+    const updated = blockedUsers.filter((b) => b.userId !== userId);
+    setBlockedUsers(updated);
+    localStorage.setItem("cc_blockedUsers", JSON.stringify(updated));
   };
 
   const handleLogout = async () => {
@@ -207,7 +250,7 @@ export default function CampusConnectApp() {
         {stage === "browse" && (
           <>
             <ActiveUsersPanel
-              users={users}
+              users={users.filter((u) => !blockedUsers.find((b) => b.userId === u.sessionId))}
               onlineCount={onlineUsers}
               onUserSelect={(user) => {
                 setPartner(user);
@@ -255,7 +298,7 @@ export default function CampusConnectApp() {
           </section>
         )}
 
-        {stage === "connected" && partner && sessionId && <ChatWorkspace partner={partner} onExit={resetFlow} userSessionId={sessionId} />}
+        {stage === "connected" && partner && sessionId && <ChatWorkspace partner={partner} onExit={resetFlow} userSessionId={sessionId} onBlockUser={blockUser} />}
       </main>
 
       <HowItWorksSheet open={openHow} onClose={() => setOpenHow(false)} />

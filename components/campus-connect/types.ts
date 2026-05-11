@@ -30,3 +30,13 @@ export type UserProfile = {
   busy?: boolean;
   typingIndicator?: boolean;
 };
+
+export type ReportReason = "inappropriate" | "harassment" | "spam" | "fake" | "other";
+
+export type BlockedUser = {
+  userId: string;
+  name: string;
+  blockedAt: string;
+  reason?: ReportReason;
+  reportDetails?: string;
+};
